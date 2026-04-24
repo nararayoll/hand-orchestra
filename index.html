@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orchestra 🎼</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #080810; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+#container { position: relative; width: 100vw; height: 100vh; }
+
+#webcam {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+  object-fit: cover; transform: scaleX(-1); opacity: 0.18;
+}
+#canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+#hud {
+  position: absolute; top: 0; left: 0; right: 0; padding: 16px 24px;
+  display: flex; justify-content: space-between; align-items: flex-start;
+  pointer-events: none;
+}
+.hand-panel {
+  background: rgba(0,0,0,0.65); border-radius: 14px; padding: 14px 22px;
+  min-width: 160px; backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.hand-label { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 2px; }
+.note-big   { font-size: 44px; font-weight: 900; margin: 4px 0; line-height: 1; }
+.note-sub   { font-size: 11px; color: #444; min-height: 14px; }
+#left-panel  .note-big { color: #44aaff; text-shadow: 0 0 30px rgba(68,170,255,0.8); }
+#right-panel .note-big { color: #ffaa44; text-shadow: 0 0 30px rgba(255,170,68,0.8); }
+#center-panel { text-align: center; padding-top: 6px; }
+#app-title  { font-size: 11px; color: #333; letter-spacing: 5px; text-transform: uppercase; }
+#guide-text { font-size: 11px; color: #252535; margin-top: 6px; line-height: 1.9; }
+
+/* 화음 바 */
+#chordbar {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  height: 56px; display: flex;
+  background: rgba(0,0,0,0.82); border-top: 1px solid #111;
+}
+.chord-cell {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  border-right: 1px solid #0f0f1a;
+  transition: all 0.12s;
+}
+.chord-cell .cn { font-size: 17px; font-weight: 900; color: #1e1e2e; letter-spacing: 1px; }
+.chord-cell .cs { font-size: 8px;  color: #181825; margin-top: 2px; letter-spacing: 0.5px; }
+.chord-cell.active    { background: rgba(68,170,255,0.18); border-top: 2px solid #44aaff; }
+.chord-cell.active .cn { color: #44aaff; }
+.chord-cell.active .cs { color: #2a5588; }
+
+/* 시작 화면 */
+#start-overlay {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(8,8,16,0.94); gap: 14px;
+}
+#app-logo { font-size: 60px; }
+#app-name  { font-size: 26px; font-weight: 900; color: white; letter-spacing: 5px; }
+#app-sub   { font-size: 14px; color: #444; }
+#start-btn {
+  margin-top: 12px; padding: 16px 52px; font-size: 18px; font-weight: 700;
+  background: linear-gradient(135deg, #44aaff, #0055cc);
+  color: white; border: none; border-radius: 50px; cursor: pointer;
+  box-shadow: 0 0 40px rgba(68,170,255,0.3); transition: all 0.2s;
+}
+#start-btn:hover { transform: scale(1.05); box-shadow: 0 0 60px rgba(68,170,255,0.5); }
+#instructions { font-size: 13px; color: #363646; text-align: center; line-height: 2.4; }
+#loading-msg  { color: #44aaff; font-size: 13px; display: none; animation: pulse 1s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+</style>
+</head>
+<body>
+<div id="container">
+  <video id="webcam" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+
+  <div id="hud">
+    <div class="hand-panel" id="left-panel">
+      <div class="hand-label">🎻 왼손 — 화음</div>
+      <div class="note-big" id="lchord">—</div>
+      <div class="note-sub"  id="lnotes">—</div>
+    </div>
+    <div id="center-panel">
+      <div id="app-title">Orchestra</div>
+      <div id="guide-text">왼손 좌우 → 화음<br>오른손 좌우 → 멜로디<br>위아래 → 음량</div>
+    </div>
+    <div class="hand-panel" id="right-panel">
+      <div class="hand-label">🎵 오른손 — 멜로디</div>
+      <div class="note-big" id="rnote">—</div>
+      <div class="note-sub"  id="rfreq">—</div>
+    </div>
+  </div>
+
+  <div id="chordbar"></div>
+
+  <div id="start-overlay">
+    <div id="app-logo">🎼</div>
+    <div id="app-name">ORCHESTRA</div>
+    <div id="app-sub">지휘자처럼 연주하세요</div>
+    <button id="start-btn" onclick="startApp()">카메라 시작</button>
+    <div id="instructions">
+      🎻 왼손 좌우 → 화음 선택 (Am · F · C · G...)<br>
+      🎵 오른손 좌우 → 멜로디 음<br>
+      양손 위아래 → 음량 조절
+    </div>
+    <div id="loading-msg">악기 샘플 로딩 중...</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/soundfont-player/dist/soundfont-player.min.js"></script>
+<script>
+
+// ── 화음 (왼손) ───────────────────────────────────────────────────────
+const CHORDS = [
+  { name:'Am',  notes:['A2','E3','A3','C4','E4'],  color:'#4488ff' },
+  { name:'Dm',  notes:['D3','A3','D4','F4'],        color:'#5577ee' },
+  { name:'F',   notes:['F2','C3','F3','A3','C4'],   color:'#6655dd' },
+  { name:'C',   notes:['C3','G3','C4','E4','G4'],   color:'#7744cc' },
+  { name:'G',   notes:['G2','D3','G3','B3','D4'],   color:'#8833bb' },
+  { name:'Em',  notes:['E2','B2','E3','G3','B3'],   color:'#9922aa' },
+  { name:'E',   notes:['E2','B2','E3','G#3','B3'],  color:'#aa1199' },
+  { name:'Am7', notes:['A2','E3','G3','C4','E4'],   color:'#bb0088' },
+];
+
+// ── 멜로디 음 (오른손) — A 자연단음계 ────────────────────────────────
+const MELODY = [
+  { name:'A3', freq:220.00 }, { name:'B3', freq:246.94 },
+  { name:'C4', freq:261.63 }, { name:'D4', freq:293.66 },
+  { name:'E4', freq:329.63 }, { name:'F4', freq:349.23 },
+  { name:'G4', freq:392.00 }, { name:'A4', freq:440.00 },
+  { name:'B4', freq:493.88 }, { name:'C5', freq:523.25 },
+  { name:'D5', freq:587.33 }, { name:'E5', freq:659.25 },
+];
+
+// ── 화음 바 생성 ──────────────────────────────────────────────────────
+const chordbar = document.getElementById('chordbar');
+CHORDS.forEach((c, i) => {
+  const cell = document.createElement('div');
+  cell.className = 'chord-cell';
+  cell.id = `cb${i}`;
+  cell.innerHTML = `<div class="cn">${c.name}</div><div class="cs">${c.notes.slice(0,3).join(' ')}</div>`;
+  chordbar.appendChild(cell);
+});
+let activeChordIdx  = -1;
+let activeMelodyIdx = -1;
+
+function updateChordBar() {
+  CHORDS.forEach((_, i) => {
+    document.getElementById(`cb${i}`).classList.toggle('active', i === activeChordIdx);
+  });
+}
+
+// ── 오디오 ────────────────────────────────────────────────────────────
+let ac = null;
+let stringInst = null, fluteInst = null;
+let stringGain = null, fluteGain  = null;
+let chordNodes = [], melodyNode = null;
+let prevChordIdx = -1, prevMelodyIdx = -1;
+
+function initAudio() {
+  ac = new (window.AudioContext || window.webkitAudioContext)();
+
+  // 홀 리버브
+  const rev = ac.createConvolver();
+  rev.buffer = makeImpulse(2.8);
+  const revSend = ac.createGain();
+  revSend.gain.value = 0.30;
+
+  stringGain = ac.createGain(); stringGain.gain.value = 0;
+  fluteGain  = ac.createGain(); fluteGain.gain.value  = 0;
+
+  [stringGain, fluteGain].forEach(g => {
+    g.connect(ac.destination);
+    g.connect(revSend);
+  });
+  revSend.connect(rev);
+  rev.connect(ac.destination);
+}
+
+function makeImpulse(dur) {
+  const len = ac.sampleRate * dur;
+  const buf = ac.createBuffer(2, len, ac.sampleRate);
+  for (let c = 0; c < 2; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < len; i++)
+      d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.5);
+  }
+  return buf;
+}
+
+async function loadInstruments(onProgress) {
+  onProgress('🎻 현악 앙상블 로딩 중...');
+  stringInst = await Soundfont.instrument(ac, 'string_ensemble_1', {
+    soundfont: 'MusyngKite', destination: stringGain, gain: 4,
+  });
+  onProgress('🎵 플루트 로딩 중...');
+  fluteInst = await Soundfont.instrument(ac, 'flute', {
+    soundfont: 'MusyngKite', destination: fluteGain, gain: 6,
+  });
+}
+
+// 왼손: 화음 재생
+function playChord(ci, vol) {
+  if (!ac || !stringInst) return;
+  const t = ac.currentTime;
+  stringGain.gain.setTargetAtTime(vol * 0.75, t, 0.06);
+  if (ci === prevChordIdx) return;
+
+  // 이전 화음 서서히 종료 (레가토)
+  chordNodes.forEach(n => n && n.stop(t + 0.55));
+  // 새 화음 전체 동시 시작
+  chordNodes = CHORDS[ci].notes.map(note =>
+    stringInst.play(note, t, { loop: true, gain: 0.75 })
+  );
+  prevChordIdx = ci;
+}
+
+function muteChord() {
+  if (!ac || !stringGain) return;
+  stringGain.gain.setTargetAtTime(0, ac.currentTime, 0.28);
+  chordNodes.forEach(n => n && n.stop(ac.currentTime + 0.6));
+  chordNodes = [];
+  prevChordIdx = -1;
+}
+
+// 오른손: 멜로디 재생
+function playMelody(ni, vol) {
+  if (!ac || !fluteInst) return;
+  const t = ac.currentTime;
+  fluteGain.gain.setTargetAtTime(vol, t, 0.04);
+  if (ni === prevMelodyIdx) return;
+
+  if (melodyNode) melodyNode.stop(t + 0.3);
+  melodyNode = fluteInst.play(MELODY[ni].name, t, { loop: true, gain: 1 });
+  prevMelodyIdx = ni;
+}
+
+function muteMelody() {
+  if (!ac || !fluteGain) return;
+  fluteGain.gain.setTargetAtTime(0, ac.currentTime, 0.18);
+  if (melodyNode) { melodyNode.stop(ac.currentTime + 0.35); melodyNode = null; }
+  prevMelodyIdx = -1;
+}
+
+// ── 캔버스 ────────────────────────────────────────────────────────────
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+const trails = { Left: [], Right: [] };
+const COLORS  = { Left: '#44aaff', Right: '#ffaa44' };
+const TRAIL_LEN = 28;
+
+function resizeCanvas() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// 화음 존 가이드 그리기
+function drawGuides(W, H) {
+  ctx.save();
+
+  // 화음 구역 세로선
+  const n = CHORDS.length;
+  ctx.strokeStyle = '#44aaff';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 14]);
+  ctx.globalAlpha = 0.055;
+  for (let i = 1; i < n; i++) {
+    const x = (i / n) * W;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // 화음 이름 배경 텍스트
+  ctx.font = 'bold 36px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.globalAlpha = activeChordIdx >= 0 ? 0.05 : 0.07;
+  for (let i = 0; i < n; i++) {
+    ctx.fillStyle = CHORDS[i].color;
+    const x = ((i + 0.5) / n) * W;
+    ctx.fillText(CHORDS[i].name, x, H * 0.52);
+  }
+
+  // 활성 화음 구역 하이라이트
+  if (activeChordIdx >= 0) {
+    const x = (activeChordIdx / n) * W;
+    const zw = W / n;
+    const grad = ctx.createLinearGradient(x, 0, x + zw, 0);
+    grad.addColorStop(0, 'rgba(68,170,255,0)');
+    grad.addColorStop(0.5, 'rgba(68,170,255,0.04)');
+    grad.addColorStop(1, 'rgba(68,170,255,0)');
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = grad;
+    ctx.fillRect(x, 0, zw, H);
+  }
+
+  ctx.restore();
+}
+
+function drawTrail(trail, col) {
+  if (trail.length < 2) return;
+  ctx.save(); ctx.lineCap = 'round';
+  for (let i = 1; i < trail.length; i++) {
+    const a = i / trail.length;
+    ctx.globalAlpha = a * 0.55;
+    ctx.strokeStyle = col;
+    ctx.lineWidth   = a * 9;
+    ctx.beginPath();
+    ctx.moveTo(trail[i-1].x, trail[i-1].y);
+    ctx.lineTo(trail[i].x,   trail[i].y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawGlow(x, y, col, intensity) {
+  const r = 18 + intensity * 55;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, col + 'cc'); g.addColorStop(1, col + '00');
+  ctx.save();
+  ctx.globalAlpha = 0.65;
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+const CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [0,9],[9,10],[10,11],[11,12],
+  [0,13],[13,14],[14,15],[15,16],
+  [0,17],[17,18],[18,19],[19,20],
+  [5,9],[9,13],[13,17],
+];
+const TIPS = [4, 8, 12, 16, 20];
+
+function drawHand(lms, W, H, col) {
+  const lx = l => (1 - l.x) * W;
+  const ly = l => l.y * H;
+  ctx.save();
+  ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.4;
+  CONNECTIONS.forEach(([a, b]) => {
+    ctx.beginPath();
+    ctx.moveTo(lx(lms[a]), ly(lms[a]));
+    ctx.lineTo(lx(lms[b]), ly(lms[b]));
+    ctx.stroke();
+  });
+  TIPS.forEach(ti => {
+    const x = lx(lms[ti]), y = ly(lms[ti]);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.3;
+    ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(x, y, 12, 0, Math.PI * 2); ctx.stroke();
+  });
+  ctx.restore();
+}
+
+// ── 손 인식 결과 처리 ─────────────────────────────────────────────────
+function onResults(results) {
+  const W = canvas.width, H = canvas.height;
+
+  ctx.fillStyle = 'rgba(8,8,16,0.17)';
+  ctx.fillRect(0, 0, W, H);
+  drawGuides(W, H);
+
+  const seen = new Set();
+
+  if (results.multiHandLandmarks?.length) {
+    results.multiHandLandmarks.forEach((lms, i) => {
+      const hand = results.multiHandedness[i].label;
+      seen.add(hand);
+
+      const p  = lms[9];
+      const vx = (1 - p.x) * W;
+      const vy = p.y * H;
+      const vol = Math.max(0.05, 1 - p.y);
+
+      if (hand === 'Left') {
+        // 왼손 → 화음 선택
+        const ci = Math.min(CHORDS.length - 1, Math.max(0, Math.floor((1 - p.x) * CHORDS.length)));
+        playChord(ci, vol);
+        activeChordIdx = ci;
+        document.getElementById('lchord').textContent = CHORDS[ci].name;
+        document.getElementById('lnotes').textContent = CHORDS[ci].notes.join(' · ');
+      } else {
+        // 오른손 → 멜로디 음
+        const ni = Math.min(MELODY.length - 1, Math.max(0, Math.floor((1 - p.x) * MELODY.length)));
+        playMelody(ni, vol);
+        activeMelodyIdx = ni;
+        document.getElementById('rnote').textContent = MELODY[ni].name;
+        document.getElementById('rfreq').textContent = `${MELODY[ni].freq.toFixed(1)} Hz`;
+      }
+
+      const col = COLORS[hand];
+      trails[hand].push({ x: vx, y: vy });
+      if (trails[hand].length > TRAIL_LEN) trails[hand].shift();
+      drawTrail(trails[hand], col);
+      drawHand(lms, W, H, col);
+      drawGlow(vx, vy, col, vol);
+    });
+  }
+
+  for (const hand of ['Left', 'Right']) {
+    if (!seen.has(hand)) {
+      trails[hand] = [];
+      if (hand === 'Left') {
+        muteChord();
+        activeChordIdx = -1;
+        document.getElementById('lchord').textContent = '—';
+        document.getElementById('lnotes').textContent = '—';
+      } else {
+        muteMelody();
+        activeMelodyIdx = -1;
+        document.getElementById('rnote').textContent = '—';
+        document.getElementById('rfreq').textContent = '—';
+      }
+    }
+  }
+
+  updateChordBar();
+}
+
+// ── 시작 ──────────────────────────────────────────────────────────────
+async function startApp() {
+  const btn  = document.getElementById('start-btn');
+  const load = document.getElementById('loading-msg');
+  btn.style.display  = 'none';
+  load.style.display = 'block';
+
+  initAudio();
+
+  const video = document.getElementById('webcam');
+  const hands = new Hands({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+  });
+  hands.setOptions({
+    maxNumHands: 2, modelComplexity: 1,
+    minDetectionConfidence: 0.65, minTrackingConfidence: 0.5,
+  });
+  hands.onResults(onResults);
+
+  const cam = new Camera(video, {
+    onFrame: async () => { await hands.send({ image: video }); },
+    width: 1280, height: 720,
+  });
+
+  try {
+    await Promise.all([
+      cam.start(),
+      loadInstruments(msg => { load.textContent = msg; }),
+    ]);
+    document.getElementById('start-overlay').style.display = 'none';
+  } catch (e) {
+    load.textContent = '오류: ' + e.message;
+    btn.style.display = 'block';
+  }
+}
+</script>
+</body>
+</html>
